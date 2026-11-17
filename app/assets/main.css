@@ -1,0 +1,24 @@
+:root {
+  --bg: #0a0f1c;
+  --panel: rgba(255, 255, 255, 0.035);
+  --border: rgba(255, 255, 255, 0.07);
+  --text: #eef2f8;
+  --muted: #8c97ab;
+  --warm: #fbbf24;
+  --cold: #7dd3fc;
+  --rain: #60a5fa;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #__nuxt {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  cursor: none;
+}

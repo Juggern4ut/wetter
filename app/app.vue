@@ -2,10 +2,33 @@
 import type { HourPoint } from '~/components/HourlyChart.vue'
 
 const REFRESH_MS = 5 * 60 * 1000 // Daten alle 5 Min. neu laden (Server cached 10 Min.)
-const RELOAD_MS = 6 * 60 * 60 * 1000 // Kompletter Seiten-Reload alle 6 Std. (neue Deploys, Speicher)
+const RELOAD_MS = 6 * 60 * 60 * 1000 // Kompletter Seiten-Reload alle 6 Std. (Speicher); Deploys werden separat erkannt
 const STALE_MS = 60 * 60 * 1000
+const RELOAD_RETRY_MS = 60 * 1000
 
 const { data, refresh, error } = await useFetch('/api/weather')
+
+// ---- Neuer Deploy / sicherer Reload ----
+// Läuft auf dem Server eine andere Build-ID als im Browser, lädt die Seite neu.
+// Vor jedem Reload wird geprüft, ob der Server erreichbar ist – sonst bliebe der
+// Bildschirm auf der Fehlerseite des Browsers hängen (dort läuft kein JS mehr).
+const buildId = useRuntimeConfig().app.buildId
+let reloadRetry: ReturnType<typeof setTimeout> | undefined
+async function safeReload() {
+  if (reloadRetry) return
+  try {
+    const res = await fetch('/', { method: 'HEAD', cache: 'no-store' })
+    if (res.ok) return location.reload()
+  }
+  catch {}
+  reloadRetry = setTimeout(() => {
+    reloadRetry = undefined
+    safeReload()
+  }, RELOAD_RETRY_MS)
+}
+watch(() => data.value?.build, (build) => {
+  if (import.meta.client && build && build !== buildId) safeReload()
+})
 
 // ---- Uhr ----
 const now = ref(Date.now())
@@ -24,13 +47,14 @@ onMounted(() => {
   window.addEventListener('resize', fit)
   tick = setInterval(() => (now.value = Date.now()), 1000)
   poll = setInterval(() => refresh(), REFRESH_MS)
-  reload = setTimeout(() => location.reload(), RELOAD_MS)
+  reload = setTimeout(safeReload, RELOAD_MS)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fit)
   clearInterval(tick)
   clearInterval(poll)
   clearTimeout(reload)
+  clearTimeout(reloadRetry)
 })
 
 // ---- Aufbereitung ----

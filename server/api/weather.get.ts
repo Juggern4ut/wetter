@@ -62,7 +62,7 @@ async function fetchWarnings(): Promise<WeatherWarning[]> {
   }
 }
 
-export default defineCachedEventHandler(async () => {
+const getWeather = defineCachedFunction(async () => {
   const [forecast, warnings] = await Promise.all([fetchForecast(), fetchWarnings()])
   return { forecast, warnings, fetchedAt: Date.now() }
 }, {
@@ -70,4 +70,11 @@ export default defineCachedEventHandler(async () => {
   swr: true,
   name: 'weather',
   getKey: () => 'niedergoesgen',
+})
+
+// Build-ID wird ausserhalb des Caches angehängt, damit Clients einen neuen Deploy
+// sofort erkennen und sich selbst neu laden (siehe app.vue).
+export default defineEventHandler(async () => {
+  const data = await getWeather()
+  return { ...data, build: useRuntimeConfig().app.buildId as string }
 })

@@ -15,7 +15,8 @@ onMounted(() => {
   onBeforeUnmount(() => ro.disconnect())
 })
 
-const STEP = 3
+// Jede 3. Stunde beschriften – bei schmalem Chart jede 4., damit sich Zeiten/Icons nicht überlappen
+const step = computed(() => ((size.w - 56) / (props.hours.length || 1)) * 3 < 90 ? 4 : 3)
 
 const geo = computed(() => {
   const { w, h } = size
@@ -62,7 +63,7 @@ const geo = computed(() => {
 
 const labels = computed(() => props.hours
   .map((p, i) => ({ ...p, i }))
-  .filter(p => p.i % STEP === 0))
+  .filter(p => p.i % step.value === 0))
 </script>
 
 <template>

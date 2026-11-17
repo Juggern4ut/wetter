@@ -6,7 +6,10 @@ const RELOAD_MS = 6 * 60 * 60 * 1000 // Kompletter Seiten-Reload alle 6 Std. (Sp
 const STALE_MS = 60 * 60 * 1000
 const RELOAD_RETRY_MS = 60 * 1000
 
+const NEWS_REFRESH_MS = 15 * 60 * 1000 // News alle 15 Min. neu laden (Server cached 30 Min.)
+
 const { data, refresh, error } = await useFetch('/api/weather')
+const { data: news, refresh: refreshNews } = await useFetch('/api/news')
 
 // ---- Neuer Deploy / sicherer Reload ----
 // Läuft auf dem Server eine andere Build-ID als im Browser, lädt die Seite neu.
@@ -41,18 +44,21 @@ function fit() {
 
 let tick: ReturnType<typeof setInterval>
 let poll: ReturnType<typeof setInterval>
+let newsPoll: ReturnType<typeof setInterval>
 let reload: ReturnType<typeof setTimeout>
 onMounted(() => {
   fit()
   window.addEventListener('resize', fit)
   tick = setInterval(() => (now.value = Date.now()), 1000)
   poll = setInterval(() => refresh(), REFRESH_MS)
+  newsPoll = setInterval(() => refreshNews(), NEWS_REFRESH_MS)
   reload = setTimeout(safeReload, RELOAD_MS)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fit)
   clearInterval(tick)
   clearInterval(poll)
+  clearInterval(newsPoll)
   clearTimeout(reload)
   clearTimeout(reloadRetry)
 })
@@ -145,83 +151,89 @@ const stale = computed(() => !!error.value || (data.value && now.value - data.va
 
       <WarningBanner v-if="warnings.length" :warnings="warnings" />
 
-      <!-- Aktuell + 24h -->
-      <section class="main">
-        <div v-if="current && today" class="now panel">
-          <div class="now-top">
-            <img :src="weatherIcon(current.code, current.isDay)" class="now-icon" alt="">
-            <div>
-              <div class="now-temp">{{ current.temp }}<span>°</span></div>
-              <div class="now-label">{{ weatherLabel(current.code) }}</div>
+      <div class="body">
+        <div class="left">
+          <!-- Aktuell + 24h -->
+          <section class="main">
+            <div v-if="current && today" class="now panel">
+              <div class="now-top">
+                <img :src="weatherIcon(current.code, current.isDay)" class="now-icon" alt="">
+                <div>
+                  <div class="now-temp">{{ current.temp }}<span>°</span></div>
+                  <div class="now-label">{{ weatherLabel(current.code) }}</div>
+                </div>
+              </div>
+              <div class="stats">
+                <div class="stat">
+                  <span class="k">Min / Max</span>
+                  <span class="v"><span class="cold">{{ today.min }}°</span> / <span class="warm">{{ today.max }}°</span></span>
+                </div>
+                <div class="stat">
+                  <span class="k">Gefühlt</span>
+                  <span class="v">{{ current.feels }}°</span>
+                </div>
+                <div class="stat">
+                  <span class="k">Regenrisiko</span>
+                  <span class="v rain">{{ today.prob }}%</span>
+                </div>
+                <div class="stat">
+                  <span class="k">Wind {{ current.windDir }}</span>
+                  <span class="v">{{ current.wind }} <small>km/h</small></span>
+                </div>
+                <div class="stat">
+                  <span class="k">Böen</span>
+                  <span class="v">{{ current.gusts }} <small>km/h</small></span>
+                </div>
+                <div class="stat">
+                  <span class="k">Feuchte</span>
+                  <span class="v">{{ current.humidity }}%</span>
+                </div>
+                <div class="stat">
+                  <span class="k">Sonne</span>
+                  <span class="v sun">{{ today.sunrise }} – {{ today.sunset }}</span>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="stats">
-            <div class="stat">
-              <span class="k">Min / Max</span>
-              <span class="v"><span class="cold">{{ today.min }}°</span> / <span class="warm">{{ today.max }}°</span></span>
+
+            <div class="hourly panel">
+              <div class="panel-head">
+                <h2>Nächste 24 Stunden</h2>
+                <div class="legend">
+                  <span><i class="dot warm-bg" /> Temperatur</span>
+                  <span><i class="dot rain-bg" /> Regenrisiko</span>
+                </div>
+              </div>
+              <HourlyChart v-if="hours.length" :hours="hours" />
             </div>
-            <div class="stat">
-              <span class="k">Gefühlt</span>
-              <span class="v">{{ current.feels }}°</span>
-            </div>
-            <div class="stat">
-              <span class="k">Regenrisiko</span>
-              <span class="v rain">{{ today.prob }}%</span>
-            </div>
-            <div class="stat">
-              <span class="k">Wind {{ current.windDir }}</span>
-              <span class="v">{{ current.wind }} <small>km/h</small></span>
-            </div>
-            <div class="stat">
-              <span class="k">Böen</span>
-              <span class="v">{{ current.gusts }} <small>km/h</small></span>
-            </div>
-            <div class="stat">
-              <span class="k">Feuchte</span>
-              <span class="v">{{ current.humidity }}%</span>
-            </div>
-            <div class="stat">
-              <span class="k">Sonne</span>
-              <span class="v sun">{{ today.sunrise }} – {{ today.sunset }}</span>
-            </div>
-          </div>
+          </section>
+
+          <!-- 7 Tage -->
+          <section class="days">
+            <article v-for="d in days" :key="d.key" class="day panel" :class="{ today: d.name === 'Heute' }">
+              <div class="day-name">{{ d.name }}</div>
+              <div class="day-date">{{ d.date }}</div>
+              <img :src="weatherIcon(d.code)" class="day-icon" alt="">
+              <div class="day-temp">
+                <span class="max">{{ d.max }}°</span>
+                <span class="min">{{ d.min }}°</span>
+              </div>
+              <div class="day-rain">
+                <img src="/icons/raindrop.svg" alt="">
+                <span class="pct">{{ d.prob }}%</span>
+                <span class="mm">{{ d.sum.toFixed(1) }} mm</span>
+              </div>
+              <div class="bar"><div :style="{ width: d.prob + '%' }" /></div>
+            </article>
+          </section>
         </div>
 
-        <div class="hourly panel">
-          <div class="panel-head">
-            <h2>Nächste 24 Stunden</h2>
-            <div class="legend">
-              <span><i class="dot warm-bg" /> Temperatur</span>
-              <span><i class="dot rain-bg" /> Niederschlagswahrscheinlichkeit</span>
-            </div>
-          </div>
-          <HourlyChart v-if="hours.length" :hours="hours" />
-        </div>
-      </section>
-
-      <!-- 7 Tage -->
-      <section class="days">
-        <article v-for="d in days" :key="d.key" class="day panel" :class="{ today: d.name === 'Heute' }">
-          <div class="day-name">{{ d.name }}</div>
-          <div class="day-date">{{ d.date }}</div>
-          <img :src="weatherIcon(d.code)" class="day-icon" alt="">
-          <div class="day-temp">
-            <span class="max">{{ d.max }}°</span>
-            <span class="min">{{ d.min }}°</span>
-          </div>
-          <div class="day-rain">
-            <img src="/icons/raindrop.svg" alt="">
-            <span class="pct">{{ d.prob }}%</span>
-            <span class="mm">{{ d.sum.toFixed(1) }} mm</span>
-          </div>
-          <div class="bar"><div :style="{ width: d.prob + '%' }" /></div>
-        </article>
-      </section>
+        <NewsFeed :items="news?.items ?? []" :now="now" />
+      </div>
 
       <footer class="status" :class="{ stale }">
         <template v-if="stale">⚠ Verbindung gestört – letzte Daten: </template>
         <template v-else>Aktualisiert </template>
-        {{ data ? formatTime(data.fetchedAt) : '–' }} · Daten: Open-Meteo, MeteoSwiss
+        {{ data ? formatTime(data.fetchedAt) : '–' }} · Daten: Open-Meteo, MeteoSwiss · News: Oltner Tagblatt
       </footer>
     </main>
   </div>
@@ -260,29 +272,33 @@ h1 { margin: 0; font-size: 56px; font-weight: 300; letter-spacing: -1px; line-he
 .clock .time { font-size: 72px; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -2px; }
 .clock .date { color: var(--muted); font-size: 22px; margin-top: 8px; }
 
+/* Inhalt: links Wetter, rechts News */
+.body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 520px; gap: 28px; }
+.left { min-height: 0; display: flex; flex-direction: column; gap: 28px; }
+
 /* Hauptbereich */
-.main { flex: 1; min-height: 0; display: grid; grid-template-columns: 720px minmax(0, 1fr); gap: 28px; }
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: 560px minmax(0, 1fr); gap: 28px; }
 
-.now { padding: 28px 36px; display: flex; flex-direction: column; justify-content: center; gap: 24px; min-height: 0; }
+.now { padding: 24px 32px; display: flex; flex-direction: column; justify-content: center; gap: 18px; min-height: 0; }
 .now-top { display: flex; align-items: center; gap: 12px; }
-.now-icon { width: 240px; height: 240px; margin: -30px -10px -30px -30px; }
-.now-temp { font-size: 160px; font-weight: 200; line-height: 0.9; letter-spacing: -6px; }
+.now-icon { width: 190px; height: 190px; margin: -28px -6px -28px -24px; }
+.now-temp { font-size: 136px; font-weight: 200; line-height: 0.9; letter-spacing: -6px; }
 .now-temp span { color: var(--muted); font-weight: 100; }
-.now-label { font-size: 32px; color: var(--muted); margin-top: 8px; }
+.now-label { font-size: 28px; color: var(--muted); margin-top: 8px; }
 
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px 16px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 16px; }
 .stat { display: flex; flex-direction: column; gap: 4px; }
 .stat:last-child { grid-column: span 2; }
-.k { color: var(--muted); font-size: 18px; text-transform: uppercase; letter-spacing: 1.5px; }
-.v { font-size: 30px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.v small { font-size: 18px; color: var(--muted); }
+.k { color: var(--muted); font-size: 15px; text-transform: uppercase; letter-spacing: 1.5px; }
+.v { font-size: 27px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.v small { font-size: 16px; color: var(--muted); }
 .warm { color: var(--warm); }
 .cold { color: var(--cold); }
 .rain { color: var(--rain); }
 
 .hourly { padding: 24px 32px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
-h2 { margin: 0; font-size: 22px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; }
+h2 { margin: 0; white-space: nowrap; font-size: 22px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; }
 .legend { display: flex; gap: 28px; color: var(--muted); font-size: 18px; }
 .legend span { display: flex; align-items: center; gap: 10px; }
 .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
@@ -290,19 +306,19 @@ h2 { margin: 0; font-size: 22px; font-weight: 500; color: var(--muted); text-tra
 .rain-bg { background: var(--rain); }
 
 /* 7 Tage */
-.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 20px; height: 300px; flex: none; }
-.day { padding: 20px 22px; display: flex; flex-direction: column; align-items: center; }
+.days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; height: 270px; flex: none; }
+.day { padding: 20px 14px; display: flex; flex-direction: column; align-items: center; }
 .day.today { background: rgba(96, 165, 250, 0.08); border-color: rgba(96, 165, 250, 0.25); }
-.day-name { font-size: 26px; font-weight: 500; }
+.day-name { font-size: 23px; font-weight: 500; }
 .day-date { font-size: 17px; color: var(--muted); margin-top: 2px; }
-.day-icon { width: 120px; height: 120px; margin: -2px 0 -10px; }
+.day-icon { width: 104px; height: 104px; margin: -2px 0 -10px; }
 .day-temp { display: flex; gap: 16px; align-items: baseline; font-variant-numeric: tabular-nums; }
-.day-temp .max { font-size: 38px; font-weight: 400; }
-.day-temp .min { font-size: 28px; color: var(--muted); font-weight: 300; }
+.day-temp .max { font-size: 34px; font-weight: 400; }
+.day-temp .min { font-size: 26px; color: var(--muted); font-weight: 300; }
 .day-rain { display: flex; align-items: center; gap: 6px; margin-top: auto; width: 100%; }
-.day-rain img { width: 34px; height: 34px; margin: -6px -4px -6px -8px; }
-.day-rain .pct { font-size: 24px; color: var(--rain); font-weight: 500; font-variant-numeric: tabular-nums; }
-.day-rain .mm { margin-left: auto; font-size: 18px; color: var(--muted); }
+.day-rain img { width: 30px; height: 30px; margin: -6px -6px -6px -8px; }
+.day-rain .pct { font-size: 20px; color: var(--rain); font-weight: 500; font-variant-numeric: tabular-nums; }
+.day-rain .mm { margin-left: auto; font-size: 15px; white-space: nowrap; color: var(--muted); }
 .bar { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.07); border-radius: 3px; margin-top: 10px; overflow: hidden; }
 .bar div { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); border-radius: 3px; transition: width 0.6s; }
 
